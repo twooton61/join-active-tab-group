@@ -1,0 +1,27 @@
+# Local dependencies and generated builds
+node_modules/
+dist/
+build/
+coverage/
+
+# Packaged extensions and signing keys
+*.zip
+*.crx
+*.pem
+*.key
+
+# Local environment and scratch files
+.env
+.env.*
+!.env.example
+.workbench/
+*.log
+
+# Editor and operating system files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

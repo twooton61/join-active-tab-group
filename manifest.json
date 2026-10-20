@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "join-active-tab-group",
+  "version": "1.6.0",
+  "description": "Links opened from other apps join the expanded tab group.",
+  "permissions": ["tabs", "tabGroups", "storage"],
+  "background": { "service_worker": "background.js" }
+}
