@@ -4,11 +4,40 @@
 // The active tab per window lives in session storage, so it survives the
 // service worker going to sleep.
 
+// Keep at most one group expanded in each window.
+const latestExpansion = new Map();
+
 // Serialize storage updates so overlapping events do not overwrite each other.
 let queue = Promise.resolve();
 const serially = (task) => (queue = queue.then(task, task));
 
 const key = (windowId) => `window:${windowId}`;
+
+async function collapseOtherGroups(group, isCurrent = () => true) {
+  // Events may be queued while a group is collapsed or removed.
+  const current = await chrome.tabGroups.get(group.id).catch(() => null);
+  if (!current || current.collapsed) return;
+  const expanded = await chrome.tabGroups.query({ windowId: current.windowId, collapsed: false });
+  for (const other of expanded) {
+    if (!isCurrent()) return;
+    if (other.id !== current.id) {
+      await chrome.tabGroups.update(other.id, { collapsed: true });
+    }
+  }
+}
+
+function onGroupExpanded(group) {
+  if (group.collapsed) return;
+  const request = {};
+  latestExpansion.set(group.windowId, request);
+  return serially(() =>
+    collapseOtherGroups(group, () => latestExpansion.get(group.windowId) === request),
+  );
+}
+
+chrome.tabGroups.onUpdated.addListener(onGroupExpanded);
+chrome.tabGroups.onCreated.addListener(onGroupExpanded);
+chrome.tabGroups.onMoved.addListener(onGroupExpanded);
 
 async function readEntry(windowId) {
   const stored = await chrome.storage.session.get(key(windowId));
@@ -32,12 +61,23 @@ async function seed() {
   await chrome.storage.session.set(
     Object.fromEntries(active.map((tab) => [key(tab.windowId), { current: tab.id }])),
   );
+  const expanded = await chrome.tabGroups.query({ collapsed: false });
+  const windowIds = new Set(expanded.map((group) => group.windowId));
+  for (const windowId of windowIds) {
+    const groups = expanded.filter((group) => group.windowId === windowId);
+    const activeTab = active.find((tab) => tab.windowId === windowId);
+    const keep = groups.find((group) => group.id === activeTab?.groupId) ?? groups[0];
+    await collapseOtherGroups(keep);
+  }
 }
 chrome.runtime.onInstalled.addListener(() => serially(seed));
 chrome.runtime.onStartup.addListener(() => serially(seed));
 
 chrome.windows.onRemoved.addListener((windowId) =>
-  serially(() => chrome.storage.session.remove(key(windowId))),
+  serially(() => {
+    latestExpansion.delete(windowId);
+    return chrome.storage.session.remove(key(windowId));
+  }),
 );
 
 async function pickGroup(tab) {

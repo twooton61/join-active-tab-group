@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "join-active-tab-group",
-  "version": "1.6.1",
-  "description": "New tabs join the expanded tab group in their window.",
+  "version": "1.7.0",
+  "description": "New tabs join the expanded tab group. Expanding a group collapses the others in its window.",
   "permissions": ["tabs", "tabGroups", "storage"],
   "background": { "service_worker": "background.js" }
 }
