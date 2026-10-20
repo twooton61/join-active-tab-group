@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>New tabs join the expanded tab group</title>
+  <rect width="128" height="128" rx="26" fill="#111827"/>
+  <rect x="18" y="21" width="25" height="10" rx="5" fill="#64748b"/>
+  <rect x="50" y="21" width="25" height="10" rx="5" fill="#64748b"/>
+  <rect x="18" y="48" width="92" height="62" rx="12" fill="#2dd4bf"/>
+  <path d="M29 67a5 5 0 0 1 5-5h12l6 7h3a5 5 0 0 1 5 5v20a5 5 0 0 1-5 5H34a5 5 0 0 1-5-5Z" fill="#111827"/>
+  <path d="M68 67a5 5 0 0 1 5-5h12l6 7h3a5 5 0 0 1 5 5v20a5 5 0 0 1-5 5H73a5 5 0 0 1-5-5Z" fill="#111827"/>
+  <path d="M95 19v23m-9-9 9 9 9-9" fill="none" stroke="#f8fafc" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
