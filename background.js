@@ -13,59 +13,11 @@ const serially = (task) => (queue = queue.then(task, task));
 
 const key = (windowId) => `window:${windowId}`;
 
-async function queryGroups(filter) {
-  return chrome.tabGroups.query(filter).catch((error) => {
-    // Chromium requires a current window even when querying all windows.
-    if (error.message === 'No current window') return [];
-    throw error;
-  });
-}
-
-async function moveActiveTabLast(windowId) {
-  const tabs = await chrome.tabs.query({ windowId }).catch((error) => {
-    if (error.message.includes('No window with id')) return [];
-    throw error;
-  });
-  const active = tabs.find((tab) => tab.active);
-  if (!active) return;
-  const peers = tabs.filter((tab) => {
-    if (active.pinned) return tab.pinned;
-    if (active.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) {
-      return tab.groupId === active.groupId;
-    }
-    return !tab.pinned;
-  });
-  const lastIndex = Math.max(...peers.map((tab) => tab.index));
-  if (active.index === lastIndex) return;
-  try {
-    await chrome.tabs.move(active.id, { index: lastIndex });
-  } catch (error) {
-    if (error.message.includes('Tabs cannot be edited right now')) {
-      // Clicking a tab can activate it before Chrome releases its drag lock.
-      setTimeout(() => serially(() => moveActiveTabLast(windowId)), 50);
-    } else if (!error.message.includes('No tab with id')) {
-      throw error;
-    }
-  }
-}
-
-chrome.tabs.onMoved.addListener((_tabId, { windowId }) =>
-  serially(() => moveActiveTabLast(windowId)),
-);
-chrome.tabs.onAttached.addListener((_tabId, { newWindowId }) =>
-  serially(() => moveActiveTabLast(newWindowId)),
-);
-chrome.tabs.onUpdated.addListener((_tabId, changes, tab) => {
-  if (changes.groupId !== undefined || changes.pinned !== undefined) {
-    return serially(() => moveActiveTabLast(tab.windowId));
-  }
-});
-
 async function collapseOtherGroups(group, isCurrent = () => true) {
   // Events may be queued while a group is collapsed or removed.
   const current = await chrome.tabGroups.get(group.id).catch(() => null);
   if (!current || current.collapsed) return;
-  const expanded = await queryGroups({ windowId: current.windowId, collapsed: false });
+  const expanded = await chrome.tabGroups.query({ windowId: current.windowId, collapsed: false });
   for (const other of expanded) {
     if (!isCurrent()) return;
     if (other.id !== current.id) {
@@ -95,12 +47,10 @@ async function readEntry(windowId) {
 chrome.tabs.onActivated.addListener(({ tabId, windowId }) =>
   serially(async () => {
     const entry = await readEntry(windowId);
-    if (entry.current !== tabId) {
-      await chrome.storage.session.set({
-        [key(windowId)]: { previous: entry.current, current: tabId },
-      });
-    }
-    await moveActiveTabLast(windowId);
+    if (entry.current === tabId) return;
+    await chrome.storage.session.set({
+      [key(windowId)]: { previous: entry.current, current: tabId },
+    });
   }),
 );
 
@@ -111,7 +61,7 @@ async function seed() {
   await chrome.storage.session.set(
     Object.fromEntries(active.map((tab) => [key(tab.windowId), { current: tab.id }])),
   );
-  const expanded = await queryGroups({ collapsed: false });
+  const expanded = await chrome.tabGroups.query({ collapsed: false });
   const windowIds = new Set(expanded.map((group) => group.windowId));
   for (const windowId of windowIds) {
     const groups = expanded.filter((group) => group.windowId === windowId);
@@ -119,7 +69,6 @@ async function seed() {
     const keep = groups.find((group) => group.id === activeTab?.groupId) ?? groups[0];
     await collapseOtherGroups(keep);
   }
-  for (const tab of active) await moveActiveTabLast(tab.windowId);
 }
 chrome.runtime.onInstalled.addListener(() => serially(seed));
 chrome.runtime.onStartup.addListener(() => serially(seed));
@@ -132,7 +81,7 @@ chrome.windows.onRemoved.addListener((windowId) =>
 );
 
 async function pickGroup(tab) {
-  const expanded = await queryGroups({ windowId: tab.windowId, collapsed: false });
+  const expanded = await chrome.tabGroups.query({ windowId: tab.windowId, collapsed: false });
   if (expanded.length <= 1) return expanded[0];
 
   const entry = await readEntry(tab.windowId);
@@ -144,10 +93,9 @@ async function pickGroup(tab) {
 chrome.tabs.onCreated.addListener((tab) =>
   serially(async () => {
     // Brave sets openerTabId even for links from other apps, so check the group instead.
-    if (tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE) {
-      const group = await pickGroup(tab);
-      if (group) await chrome.tabs.group({ groupId: group.id, tabIds: tab.id });
-    }
-    await moveActiveTabLast(tab.windowId);
+    if (tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) return;
+    const group = await pickGroup(tab);
+    if (!group) return;
+    await chrome.tabs.group({ groupId: group.id, tabIds: tab.id });
   }),
 );
