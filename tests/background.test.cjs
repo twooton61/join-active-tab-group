@@ -180,6 +180,98 @@ test('already grouped tabs and tabs in windows without an expanded group stay pu
   assert.deepEqual(app.joined, []);
 });
 
+test('saved groups restored after tab creation keep all their tabs', async () => {
+  // Also cover a saved group containing just one tab and a collapsed group.
+  for (const count of [1, 3]) {
+    for (const collapsed of [false, true]) {
+      const app = setup([group(1)], [], { holdSettling: true });
+      const pending = Array.from({ length: count }, (_, index) =>
+        app.chrome.tabs.onCreated.emit({ id: 10 + index, windowId: 1, groupId: -1 }));
+      await new Promise(setImmediate);
+      assert.deepEqual(app.joined, []);
+      assert.equal(app.settling.length, count);
+
+      // The browser creates the group and assigns membership in a later turn.
+      app.groups.set(2, group(2, 1, collapsed));
+      for (let index = 0; index < count; index++) app.tabs.get(10 + index).groupId = 2;
+      await app.chrome.tabGroups.onCreated.emit(group(2, 1, collapsed));
+      for (const resume of app.settling) resume();
+      await Promise.all(pending);
+
+      assert.deepEqual(app.joined, []);
+      assert.equal(app.groups.has(2), true);
+      assert.deepEqual(app.expanded(1), collapsed ? [1] : [2]);
+      assert.deepEqual(app.errors, []);
+    }
+  }
+});
+
+test('group assignment cancels pending placement even if the tab is later ungrouped', async () => {
+  const app = setup([group(1)], [], { holdSettling: true });
+  const pending = app.chrome.tabs.onCreated.emit({ id: 10, windowId: 1, groupId: -1 });
+  await app.chrome.tabs.onUpdated.emit(10, { groupId: 2 });
+  await app.chrome.tabs.onUpdated.emit(10, { groupId: -1 });
+  app.settling[0]();
+  await pending;
+  assert.deepEqual(app.joined, []);
+  assert.deepEqual(app.errors, []);
+});
+
+test('a saved group restored during a tab-edit retry keeps both groups', async () => {
+  const app = setup([group(1, 1, false)], [], { holdSettling: true });
+  const original = app.chrome.tabs.group;
+  let attempts = 0;
+  app.chrome.tabs.group = async (args) => {
+    if (attempts++ === 0) {
+      // The browser finishes restoring SmartPath while Oodle's attempted
+      // edit is locked. The retry must not take SmartPath's restored tab.
+      app.groups.set(2, group(2));
+      await app.chrome.tabs.onUpdated.emit(10, { groupId: 2 });
+      void app.chrome.tabGroups.onCreated.emit(group(2));
+      throw new Error('Tabs cannot be edited right now');
+    }
+    return original(args);
+  };
+  const pending = app.chrome.tabs.onCreated.emit({ id: 10, windowId: 1, groupId: -1 });
+  app.settling[0]();
+  await pending;
+  // Drain the queued group-created handler.
+  await app.chrome.tabs.onActivated.emit({ tabId: 10, windowId: 1 });
+  assert.deepEqual([...app.groups.keys()], [1, 2]);
+  assert.equal(app.tabs.get(10).groupId, 2);
+  assert.deepEqual(app.expanded(1), [2]);
+  assert.deepEqual(app.joined, []);
+  assert.equal(attempts, 1);
+  assert.deepEqual(app.errors, []);
+});
+
+test('ordinary new tabs settle without blocking group switching or activation', async () => {
+  const app = setup([group(1), group(2, 1, true)], [], { holdSettling: true });
+  const pending = app.chrome.tabs.onCreated.emit({ id: 10, windowId: 1, groupId: -1 });
+  await new Promise(setImmediate);
+  assert.deepEqual(app.joined, []);
+  assert.equal(app.settling.length, 1);
+  app.groups.get(2).collapsed = false;
+  await app.chrome.tabGroups.onUpdated.emit(group(2));
+  await app.chrome.tabs.onActivated.emit({ tabId: 10, windowId: 1 });
+  assert.deepEqual(app.expanded(1), [2]);
+  app.settling[0]();
+  await pending;
+  assert.deepEqual(app.joined, [{ groupId: 2, tabIds: 10 }]);
+});
+
+test('membership assigned while choosing a destination is respected', async () => {
+  const app = setup([group(1)]);
+  const original = app.chrome.tabGroups.query;
+  app.chrome.tabGroups.query = async (filter) => {
+    const result = await original(filter);
+    app.tabs.get(10).groupId = 2;
+    return result;
+  };
+  await app.chrome.tabs.onCreated.emit({ id: 10, windowId: 1, groupId: -1 });
+  assert.deepEqual(app.joined, []);
+});
+
 test('auto collapse retries while Brave temporarily blocks tab edits', async () => {
   const app = setup([group(1), group(2)], [], { editFailures: 2 });
   await app.chrome.tabGroups.onUpdated.emit(group(2));
@@ -211,6 +303,19 @@ test('a newer group expansion supersedes a retry waiting for the tab strip', asy
   await Promise.all([first, second]);
   assert.deepEqual(app.expanded(1), [3]);
   assert.deepEqual(app.errors, []);
+});
+
+test('queued new tabs respect closing, pinning, and manual group changes', async () => {
+  for (const change of ['closed', 'pinned', 'grouped']) {
+    const app = setup([group(1)]);
+    const pending = app.chrome.tabs.onCreated.emit({ id: 10, windowId: 1, groupId: -1 });
+    if (change === 'closed') app.tabs.delete(10);
+    if (change === 'pinned') app.tabs.get(10).pinned = true;
+    if (change === 'grouped') app.tabs.get(10).groupId = 2;
+    await pending;
+    assert.deepEqual(app.joined, []);
+    assert.deepEqual(app.errors, []);
+  }
 });
 
 test('unrelated edit errors are reported once without blocking subsequent events', async () => {

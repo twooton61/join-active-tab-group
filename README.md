@@ -37,6 +37,11 @@ you leave expanded in that window.
 
 You can keep every group collapsed. With no expanded group, the extension leaves
 new tabs ungrouped. Tabs that already belong to a group keep their membership.
+New tabs wait half a second before joining, giving the browser time to assign
+tabs reopened from saved groups to their original group.
+Once a pending tab is assigned to a group, the extension leaves its placement
+alone, including while retrying a temporarily blocked tab edit. Reopening a
+saved group keeps it separate from the group you were using.
 
 On install, extension reload, or browser startup, the extension collapses extra
 expanded groups. It keeps the active tab's group expanded when possible; otherwise

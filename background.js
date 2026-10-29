@@ -107,12 +107,39 @@ async function pickGroup(tab) {
   return expanded.find((group) => group.id === source?.groupId);
 }
 
-chrome.tabs.onCreated.addListener((tab) =>
-  serially(async () => {
-    // Brave sets openerTabId even for links from other apps, so check the group instead.
-    if (tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) return;
-    const group = await pickGroup(tab);
-    if (!group) return;
-    await chrome.tabs.group({ groupId: group.id, tabIds: tab.id });
-  }),
-);
+// Chrome may emit onCreated before assigning restored tabs to their saved
+// group. Let that operation settle before considering an ungrouped tab ours.
+// Wait outside the queue so group and activation events can still run.
+const NEW_TAB_SETTLE_MS = 500;
+const pendingTabs = new Set();
+// Once the browser or user has assigned a group, this is no longer our tab
+// to place, even if it becomes ungrouped again before a queued edit runs.
+chrome.tabs.onUpdated.addListener((tabId, changes) => {
+  if (changes.groupId !== undefined && changes.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) {
+    pendingTabs.delete(tabId);
+  }
+});
+chrome.tabs.onRemoved.addListener((tabId) => pendingTabs.delete(tabId));
+
+chrome.tabs.onCreated.addListener(async (tab) => {
+  if (tab.pinned || tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) return;
+  pendingTabs.add(tab.id);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, NEW_TAB_SETTLE_MS));
+    return await serially(async () => {
+      if (!pendingTabs.has(tab.id)) return;
+      // A tab may have closed, been pinned, or joined a group while waiting.
+      const current = await chrome.tabs.get(tab.id).catch(() => null);
+      // Brave sets openerTabId even for links from other apps, so check the group instead.
+      if (!current || current.pinned || current.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) return;
+      const group = await pickGroup(current);
+      if (!group) return;
+      // Picking a group uses async APIs; respect membership changes during it too.
+      const latest = await chrome.tabs.get(tab.id).catch(() => null);
+      if (!pendingTabs.has(tab.id) || !latest || latest.pinned || latest.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) return;
+      await chrome.tabs.group({ groupId: group.id, tabIds: current.id });
+    });
+  } finally {
+    pendingTabs.delete(tab.id);
+  }
+});
