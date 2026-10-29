@@ -98,12 +98,32 @@ test('expanding a group collapses peers only in its own window', async () => {
   assert.deepEqual(app.expanded(2), [3]);
 });
 
-test('creating or moving an expanded group collapses its peers', async () => {
-  for (const name of ['onCreated', 'onMoved']) {
-    const app = setup([group(1), group(2)]);
-    await app.chrome.tabGroups[name].emit(group(2));
-    assert.deepEqual(app.expanded(1), [2]);
+test('creating an expanded group collapses its peers', async () => {
+  const app = setup([group(1), group(2)]);
+  await app.chrome.tabGroups.onCreated.emit(group(2));
+  assert.deepEqual(app.expanded(1), [2]);
+});
+
+test('group position changes leave expansion states alone', async () => {
+  // Even if multiple groups are expanded, rearranging the tab strip does not
+  // express an intent to switch groups.
+  const app = setup([group(1), group(2), group(3, 1, true), group(4, 2)]);
+  for (const moved of [group(2), group(3, 1, true), group(1)]) {
+    await app.chrome.tabGroups.onMoved.emit(moved);
   }
+  assert.deepEqual(app.expanded(1), [1, 2]);
+  assert.deepEqual(app.expanded(2), [4]);
+  assert.deepEqual(app.errors, []);
+});
+
+test('group movement cannot supersede an expansion waiting for a tab edit', async () => {
+  const app = setup([group(1), group(2)], [], { editFailures: 1 });
+  const expansion = app.chrome.tabGroups.onUpdated.emit(group(2));
+  await new Promise(setImmediate);
+  await app.chrome.tabGroups.onMoved.emit(group(1));
+  await expansion;
+  assert.deepEqual(app.expanded(1), [2]);
+  assert.deepEqual(app.errors, []);
 });
 
 test('rapid expansions keep the most recently expanded group', async () => {

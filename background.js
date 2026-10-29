@@ -53,7 +53,8 @@ function onGroupExpanded(group) {
 
 chrome.tabGroups.onUpdated.addListener(onGroupExpanded);
 chrome.tabGroups.onCreated.addListener(onGroupExpanded);
-chrome.tabGroups.onMoved.addListener(onGroupExpanded);
+// Position changes are not expansions. In particular, tab-strip changes when
+// closing tabs must not make another group collapse the one being used.
 
 async function readEntry(windowId) {
   const stored = await chrome.storage.session.get(key(windowId));
