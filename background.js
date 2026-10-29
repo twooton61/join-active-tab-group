@@ -9,7 +9,23 @@ const latestExpansion = new Map();
 
 // Serialize storage updates so overlapping events do not overwrite each other.
 let queue = Promise.resolve();
-const serially = (task) => (queue = queue.then(task, task));
+async function retryTabEdits(task) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await task();
+    } catch (error) {
+      // Brave/Chrome temporarily lock tab edits during tab-strip interactions.
+      // Retry the whole task so it checks the latest tab and group state again.
+      if (!error.message?.includes('Tabs cannot be edited right now') || attempt >= 10) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+}
+const serially = (task) => (queue = queue
+  .then(() => retryTabEdits(task))
+  .catch((error) => console.error('join-active-tab-group:', error)));
 
 const key = (windowId) => `window:${windowId}`;
 

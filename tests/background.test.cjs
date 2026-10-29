@@ -5,15 +5,26 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(require.resolve('../background.js'), 'utf8');
 
-function setup(initialGroups, activeTabs = []) {
+function setup(initialGroups, activeTabs = [], { editFailures = 0, holdSettling = false } = {}) {
   const groups = new Map(initialGroups.map((group) => [group.id, { ...group }]));
+  const tabs = new Map(activeTabs.map((tab) => [tab.id, { ...tab }]));
   const storage = {};
   const joined = [];
-  const event = () => {
+  const errors = [];
+  const settling = [];
+  const edit = () => {
+    if (editFailures-- > 0) {
+      throw new Error('Tabs cannot be edited right now (user may be dragging a tab).');
+    }
+  };
+  const event = (before = () => {}) => {
     const listeners = [];
     return {
       addListener: (listener) => listeners.push(listener),
-      emit: (...args) => Promise.all(listeners.map((listener) => listener(...args))),
+      emit: (...args) => {
+        before(...args);
+        return Promise.all(listeners.map((listener) => listener(...args)));
+      },
     };
   };
   const chrome = {
@@ -23,14 +34,19 @@ function setup(initialGroups, activeTabs = []) {
       remove: async (key) => { delete storage[key]; },
     } },
     tabs: {
-      onActivated: event(), onCreated: event(),
+      onActivated: event(), onCreated: event((tab) => tabs.set(tab.id, { ...tab })),
+      onUpdated: event((id, changes) => Object.assign(tabs.get(id), changes)),
+      onRemoved: event((id) => tabs.delete(id)),
       query: async () => activeTabs,
       get: async (id) => {
-        const tab = activeTabs.find((tab) => tab.id === id);
+        const tab = tabs.get(id);
         if (!tab) throw new Error('Tab removed');
         return tab;
       },
-      group: async (args) => { joined.push(JSON.parse(JSON.stringify(args))); },
+      group: async (args) => {
+        edit();
+        joined.push(JSON.parse(JSON.stringify(args)));
+      },
     },
     tabGroups: {
       TAB_GROUP_ID_NONE: -1,
@@ -43,6 +59,7 @@ function setup(initialGroups, activeTabs = []) {
         .filter((group) => Object.entries(filter).every(([key, value]) => group[key] === value))
         .map((group) => ({ ...group })),
       update: async (id, changes) => {
+        edit();
         const group = groups.get(id);
         Object.assign(group, changes);
         // Browser events are dispatched without waiting for listener promises.
@@ -53,10 +70,20 @@ function setup(initialGroups, activeTabs = []) {
     runtime: { onInstalled: event(), onStartup: event() },
     windows: { onRemoved: event() },
   };
-  const context = vm.createContext({ chrome });
+  const context = vm.createContext({
+    chrome,
+    setTimeout: (callback, delay) => {
+      if (holdSettling && delay === 500) {
+        settling.push(callback);
+        return;
+      }
+      return setTimeout(callback, 0);
+    },
+    console: { error: (...args) => errors.push(args) },
+  });
   vm.runInContext(source, context);
   return {
-    chrome, groups, joined,
+    chrome, groups, tabs, joined, errors, settling,
     expanded: (windowId) => [...groups.values()]
       .filter((group) => group.windowId === windowId && !group.collapsed).map((group) => group.id),
   };
@@ -131,4 +158,53 @@ test('already grouped tabs and tabs in windows without an expanded group stay pu
   await app.chrome.tabs.onCreated.emit({ id: 10, windowId: 1, groupId: 1 });
   await app.chrome.tabs.onCreated.emit({ id: 11, windowId: 2, groupId: -1 });
   assert.deepEqual(app.joined, []);
+});
+
+test('auto collapse retries while Brave temporarily blocks tab edits', async () => {
+  const app = setup([group(1), group(2)], [], { editFailures: 2 });
+  await app.chrome.tabGroups.onUpdated.emit(group(2));
+  assert.deepEqual(app.expanded(1), [2]);
+  assert.deepEqual(app.errors, []);
+});
+
+test('new tab grouping retries while Brave temporarily blocks tab edits', async () => {
+  const app = setup([group(1)], [], { editFailures: 2 });
+  await app.chrome.tabs.onCreated.emit({ id: 10, windowId: 1, groupId: -1 });
+  assert.deepEqual(app.joined, [{ groupId: 1, tabIds: 10 }]);
+  assert.deepEqual(app.errors, []);
+});
+
+test('exhausted retries report the error and let later events run', async () => {
+  const app = setup([group(1), group(2)], [], { editFailures: 11 });
+  await app.chrome.tabGroups.onUpdated.emit(group(2));
+  assert.equal(app.errors.length, 1);
+  await app.chrome.tabGroups.onUpdated.emit(group(2));
+  assert.deepEqual(app.expanded(1), [2]);
+});
+
+test('a newer group expansion supersedes a retry waiting for the tab strip', async () => {
+  const app = setup([group(1), group(2), group(3)], [], { editFailures: 1 });
+  const first = app.chrome.tabGroups.onUpdated.emit(group(2));
+  // Let the first edit fail and reach its retry timer.
+  await new Promise(setImmediate);
+  const second = app.chrome.tabGroups.onUpdated.emit(group(3));
+  await Promise.all([first, second]);
+  assert.deepEqual(app.expanded(1), [3]);
+  assert.deepEqual(app.errors, []);
+});
+
+test('unrelated edit errors are reported once without blocking subsequent events', async () => {
+  const app = setup([group(1)]);
+  const original = app.chrome.tabs.group;
+  let attempts = 0;
+  app.chrome.tabs.group = async () => {
+    attempts++;
+    throw new Error('No group with id: 1.');
+  };
+  await app.chrome.tabs.onCreated.emit({ id: 10, windowId: 1, groupId: -1 });
+  assert.equal(attempts, 1);
+  assert.equal(app.errors.length, 1);
+  app.chrome.tabs.group = original;
+  await app.chrome.tabs.onCreated.emit({ id: 11, windowId: 1, groupId: -1 });
+  assert.deepEqual(app.joined, [{ groupId: 1, tabIds: 11 }]);
 });
