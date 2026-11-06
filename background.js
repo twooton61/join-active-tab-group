@@ -35,6 +35,7 @@ const serially = (task) => (queue = queue
 
 const key = (windowId) => `window:${windowId}`;
 const routeKey = (tabId) => `route:${tabId}`;
+const navigationKey = (tabId) => `navigation:${tabId}`;
 const destination = (tab) => tab.pendingUrl || tab.url || '';
 const isRoutableUrl = (url) => /^(https?|chrome-extension|chrome|brave):\/\//.test(url);
 const isWaitingUrl = (url) => !url || /^(about:blank|chrome:\/\/newtab\/|brave:\/\/newtab\/)$/.test(url);
@@ -125,36 +126,60 @@ const pendingTabs = new Set();
 const placementVersions = new Map();
 // Once the browser or user has assigned a group, this is no longer our tab
 // to place, even if it becomes ungrouped again before a queued edit runs.
-// Only blank/new-tab pages placed by us may be routed on their first supported
-// navigation away from the placeholder. Persist ownership while the worker sleeps.
+// Remember each tab's URL so initial restore notifications and duplicate URL
+// events do not move saved groups. Later navigation can follow explicit rules.
 chrome.tabs.onUpdated.addListener((tabId, changes) => {
   if (changes.groupId !== undefined || changes.pinned !== undefined) {
     placementVersions.set(tabId, (placementVersions.get(tabId) ?? 0) + 1);
   }
-  if (changes.groupId !== undefined && changes.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) {
+  const assignedDuringPlacement = pendingTabs.has(tabId)
+    && changes.groupId !== undefined && changes.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE;
+  if (assignedDuringPlacement) {
     pendingTabs.delete(tabId);
   }
   if (changes.url === undefined && changes.groupId === undefined && changes.pinned === undefined) return;
+  const version = placementVersions.get(tabId);
   const update = serially(async () => {
     const entry = (await chrome.storage.session.get(routeKey(tabId)))[routeKey(tabId)];
-    if (!entry) return;
-    if (changes.pinned || (changes.groupId !== undefined && changes.groupId !== entry.groupId)) {
+    const previous = (await chrome.storage.session.get(navigationKey(tabId)))[navigationKey(tabId)];
+    const manuallyPlaced = entry && (changes.pinned
+      || (changes.groupId !== undefined && changes.groupId !== entry.groupId));
+    if (manuallyPlaced) {
       await chrome.storage.session.remove(routeKey(tabId));
+    }
+    if (changes.url === undefined) {
+      // A restored or manually placed blank tab keeps its initial destination.
+      if (((assignedDuringPlacement && !entry) || manuallyPlaced) && isWaitingUrl(previous?.url)) {
+        await chrome.storage.session.set({ [navigationKey(tabId)]: { ...previous, ignoreFirstUrl: true } });
+      }
       return;
     }
-    if (!changes.url || !isRoutableUrl(changes.url) || isWaitingUrl(changes.url) || pendingTabs.has(tabId)) return;
+    const next = {
+      url: changes.url,
+      ignoreFirstUrl: isWaitingUrl(changes.url) && Boolean(previous?.ignoreFirstUrl),
+    };
+    if (!changes.url || !isRoutableUrl(changes.url) || isWaitingUrl(changes.url)
+      || pendingTabs.has(tabId) || previous?.ignoreFirstUrl || previous?.url === changes.url || manuallyPlaced) {
+      await chrome.storage.session.set({ [navigationKey(tabId)]: next });
+      return;
+    }
     const current = await chrome.tabs.get(tabId).catch(() => null);
-    if (current && !current.pinned && current.groupId === entry.groupId) {
-      await placeTab(current, () => true, entry.groupId, false);
+    if (current && !current.pinned) {
+      await placeTab(current, () => placementVersions.get(tabId) === version, current.groupId, false);
     }
     await chrome.storage.session.remove(routeKey(tabId));
+    // Record success after tab edits, so a locked tab strip can retry this URL.
+    await chrome.storage.session.set({ [navigationKey(tabId)]: next });
   });
   if (changes.url) return update;
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
   pendingTabs.delete(tabId);
   placementVersions.delete(tabId);
-  return serially(() => chrome.storage.session.remove(routeKey(tabId)));
+  return serially(async () => {
+    await chrome.storage.session.remove(routeKey(tabId));
+    await chrome.storage.session.remove(navigationKey(tabId));
+  });
 });
 
 async function placeTab(tab, isCurrent, expectedGroupId, fallback = true) {
@@ -191,7 +216,12 @@ async function placeTab(tab, isCurrent, expectedGroupId, fallback = true) {
 }
 
 chrome.tabs.onCreated.addListener(async (tab) => {
-  if (tab.pinned || tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) return;
+  const url = destination(tab);
+  const recorded = serially(() => chrome.storage.session.set({ [navigationKey(tab.id)]: {
+    url,
+    ignoreFirstUrl: tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE && isWaitingUrl(url),
+  } }));
+  if (tab.pinned || tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) return recorded;
   pendingTabs.add(tab.id);
   try {
     await new Promise((resolve) => setTimeout(resolve, NEW_TAB_SETTLE_MS));

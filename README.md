@@ -36,7 +36,8 @@ Click the group's label to expand or collapse it. New tabs join whichever group
 you leave expanded in that window.
 
 You can keep every group collapsed. With no expanded group, the extension leaves
-new tabs ungrouped. Tabs that already belong to a group keep their membership.
+new tabs ungrouped. Existing group membership stays unchanged until a later
+navigation matches a URL rule.
 New tabs wait half a second before joining, giving the browser time to assign
 tabs reopened from saved groups to their original group.
 Once a pending tab is assigned to a group, the extension leaves its placement
@@ -89,10 +90,15 @@ tab's window, or creates one there. A routed active tab expands its group;
 a routed background tab leaves an existing group's expansion state alone,
 and newly created background groups are collapsed.
 
-Blank and new-tab pages first use the expanded group, then can be routed on
-their first web, extension, or browser-page navigation. Later navigation does not move tabs. Pinned tabs,
-already grouped tabs, restored groups, and tabs you manually move stay put.
-Saving rules does not rearrange existing tabs.
+URL rules also apply when an existing tab navigates to a different URL, including
+sidebar navigation within a website. For example, a Basecamp tab in SmartPath
+moves to Miami when its new URL matches a Miami rule. An unmatched URL keeps the
+tab in its current group. Pinned tabs stay put.
+
+Restored tabs keep their saved group during their initial load. Manually moving
+a tab does not immediately reapply its rule; a later URL change can route it again.
+Blank and new-tab pages first use the expanded group, then follow URL rules when
+you navigate. Saving rules does not rearrange existing tabs.
 
 Rules use `chrome.storage.sync`, persist across restarts, and sync when your
 browser and account settings enable extension sync. Chrome and Brave keep
@@ -109,7 +115,8 @@ The extension uses Manifest V3 and a background service worker:
   tabs and collapses peers when a group expands.
 - `chrome.storage.session` remembers the active and previous tab in each window
   while the service worker sleeps. This helps choose a group if several are
-  briefly expanded at once.
+  briefly expanded at once. It also remembers each tab's last URL to distinguish
+  later navigation from initial restore notifications.
 - `rules.js` shares URL-pattern validation and matching with the Options page.
 - `options.html`, `options.css`, and `options.js` provide the rule editor.
 - `manifest.json` declares the service worker, permissions, and extension icons.
@@ -121,7 +128,7 @@ The extension requests three permissions:
 
 - `tabs` lets it query tabs and add new tabs to a group.
 - `tabGroups` lets it find expanded groups and collapse the others.
-- `storage` lets it remember tab IDs for the current browser session and save
+- `storage` lets it remember tab IDs and last URLs for the current browser session and save
   URL rules in browser sync storage. Rules may be synced by your browser.
 
 It has no content scripts, analytics, or network requests. It does not read page

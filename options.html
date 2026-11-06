@@ -40,9 +40,10 @@
       <input id="test-url" type="url" placeholder="https://github.com/ThinkOodle/smart-path-rails/issues">
       <p id="test-result" role="status" aria-live="polite"></p>
     </section>
-    <p class="note">Missing groups are created in the same window. Manually grouped and pinned tabs
-      stay where you put them. Blank new tabs can move on their first web, extension, or browser-page navigation;
-      later navigation does not change their group.</p>
+    <p class="note">Missing groups are created in the same window. Rules apply to new tabs and when
+      an existing tab navigates to a different URL. Unmatched URLs keep their current group.
+      Pinned tabs stay put. Restored tabs keep their saved group during their initial load.
+      Manually moved tabs stay where you put them until a later navigation matches a rule.</p>
     <p class="note">Rules are saved in browser sync storage and sync when your browser and account
       settings allow it. Chrome and Brave keep separate settings.</p>
   </main>

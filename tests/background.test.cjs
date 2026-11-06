@@ -39,7 +39,11 @@ function setup(initialGroups, activeTabs = [], { editFailures = 0, holdSettling 
     } },
     tabs: {
       onActivated: event(), onCreated: event((tab) => tabs.set(tab.id, { ...tab })),
-      onUpdated: event((id, changes) => Object.assign(tabs.get(id), changes)),
+      onUpdated: event((id, changes) => {
+        const tab = tabs.get(id);
+        if (changes.url !== undefined) delete tab.pendingUrl;
+        Object.assign(tab, changes);
+      }),
       onRemoved: event((id) => tabs.delete(id)),
       query: async () => activeTabs,
       get: async (id) => {
@@ -354,6 +358,105 @@ const named = (id, title, windowId = 1, collapsed = true) => ({ ...group(id, win
 const newTab = (url, extra = {}) => ({ id: 10, windowId: 1, groupId: -1, url, ...extra });
 const drain = (app) => app.chrome.tabs.onActivated.emit({ tabId: 10, windowId: 1 });
 
+test('an existing SmartPath tab moves to Miami when Basecamp sidebar navigation changes its URL', async () => {
+  const app = setup([named(1, 'SmartPath', 1, false), named(2, 'Miami')], [newTab(
+    'https://app.basecamp.com/3091894/buckets/45782624/messages/1',
+    { groupId: 1, active: true },
+  )], { rules: [
+    rule('https://*.basecamp.com/3091894/*/45782624/*', 'SmartPath'),
+    rule('https://*.basecamp.com/3091894/*/46017775/*', 'Miami'),
+  ] });
+  await app.chrome.tabs.onUpdated.emit(10, {
+    url: 'https://app.basecamp.com/3091894/buckets/46017775/messages/1048236643#__recording_10484507933',
+  });
+  await drain(app);
+  assert.deepEqual(app.joined, [{ groupId: 2, tabIds: 10 }]);
+  assert.deepEqual(app.expanded(1), [2]);
+  await app.chrome.tabs.onUpdated.emit(10, {
+    url: 'https://app.basecamp.com/3091894/buckets/45782624/messages/2',
+  });
+  await drain(app);
+  assert.equal(app.tabs.get(10).groupId, 1);
+  assert.deepEqual(app.expanded(1), [1]);
+  assert.deepEqual(app.errors, []);
+});
+
+test('restored grouped tabs ignore their initial URL notifications but follow later navigation', async () => {
+  const url = 'https://example.com/project/42';
+  for (const initial of [url, '']) {
+    const app = setup([group(1), named(2, 'Project')], [], { rules: [rule()] });
+    await app.chrome.tabs.onCreated.emit(newTab(initial, { groupId: 1 }));
+    await app.chrome.tabs.onUpdated.emit(10, { url });
+    assert.equal(app.tabs.get(10).groupId, 1);
+    assert.deepEqual(app.joined, []);
+    await app.chrome.tabs.onUpdated.emit(10, { url: 'https://example.com/project/43' });
+    assert.equal(app.tabs.get(10).groupId, 2);
+    assert.deepEqual(app.errors, []);
+  }
+});
+
+test('a saved group assigned during settling keeps a URL that arrives after settling', async () => {
+  const app = setup([group(1), named(2, 'Project')], [], { rules: [rule()], holdSettling: true });
+  const pending = app.chrome.tabs.onCreated.emit(newTab(''));
+  await app.chrome.tabs.onUpdated.emit(10, { groupId: 1 });
+  app.settling[0]();
+  await pending;
+  await app.chrome.tabs.onUpdated.emit(10, { url: 'https://example.com/project/42' });
+  assert.deepEqual(app.joined, []);
+  assert.equal(app.tabs.get(10).groupId, 1);
+  await app.chrome.tabs.onUpdated.emit(10, { url: 'https://example.com/project/43' });
+  assert.equal(app.tabs.get(10).groupId, 2);
+});
+
+test('later navigation keeps pinned tabs and unmatched URLs in place', async () => {
+  for (const pinned of [false, true]) {
+    const app = setup([group(1), named(2, 'Project')], [], { rules: [rule()] });
+    await app.chrome.tabs.onCreated.emit(newTab('https://unrelated.com/', { groupId: 1, pinned }));
+    await app.chrome.tabs.onUpdated.emit(10, { url: 'https://unmatched.com/' });
+    assert.equal(app.tabs.get(10).groupId, 1);
+    await app.chrome.tabs.onUpdated.emit(10, { url: 'https://example.com/project/42' });
+    assert.equal(app.tabs.get(10).groupId, pinned ? 1 : 2);
+    assert.deepEqual(app.errors, []);
+  }
+});
+
+test('manual placement stays put until navigation changes the URL', async () => {
+  const app = setup([group(1), named(2, 'Project'), named(3, 'Manual')], [], { rules: [rule()] });
+  const url = 'https://example.com/project/42';
+  await app.chrome.tabs.onCreated.emit(newTab(url));
+  await app.chrome.tabs.onUpdated.emit(10, { groupId: 3 });
+  await app.chrome.tabs.onUpdated.emit(10, { url });
+  assert.equal(app.tabs.get(10).groupId, 3);
+  await app.chrome.tabs.onUpdated.emit(10, { url: 'https://example.com/project/43' });
+  assert.equal(app.tabs.get(10).groupId, 2);
+});
+
+test('navigation routing retries a locked tab edit without losing the destination URL', async () => {
+  const app = setup([group(1), named(2, 'Project')], [newTab('https://unrelated.com/', { groupId: 1 })], {
+    rules: [rule()], editFailures: 2,
+    session: { 'navigation:10': { url: 'https://unrelated.com/' } },
+  });
+  await app.chrome.tabs.onUpdated.emit(10, { url: 'https://example.com/project/42' });
+  assert.deepEqual(app.joined, [{ groupId: 2, tabIds: 10 }]);
+  assert.deepEqual(app.errors, []);
+});
+
+test('later navigation respects a manual move while its lookup is waiting', async () => {
+  const app = setup([group(1), named(2, 'Project'), named(3, 'Manual')], [newTab('https://unrelated.com/', { groupId: 1 })], {
+    rules: [rule()],
+  });
+  const query = app.chrome.tabGroups.query;
+  app.chrome.tabGroups.query = async (filter) => {
+    const result = await query(filter);
+    void app.chrome.tabs.onUpdated.emit(10, { groupId: 3 });
+    void app.chrome.tabs.onUpdated.emit(10, { groupId: 1 });
+    return result;
+  };
+  await app.chrome.tabs.onUpdated.emit(10, { url: 'https://example.com/project/42' });
+  assert.deepEqual(app.joined, []);
+  assert.equal(app.tabs.get(10).groupId, 1);
+});
+
 test('extension pages route to Oodle on creation, including pending URLs', async () => {
   const url = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop/options.html';
   for (const extra of [{ url }, { url: '', pendingUrl: url }]) {
@@ -387,7 +490,7 @@ test('browser pages route on creation, pending URL, and first navigation with ei
       assert.equal(app.tabs.get(10).groupId, 2);
       assert.deepEqual(app.expanded(1), [2]);
       await app.chrome.tabs.onUpdated.emit(10, { url: 'https://example.com/' });
-      assert.equal(app.tabs.get(10).groupId, 2);
+      assert.equal(app.groups.get(app.tabs.get(10).groupId).title, 'Web');
       assert.deepEqual(app.errors, []);
     }
   }
@@ -419,10 +522,10 @@ test('the exact Oodle shorthand rules route new and initially blank tabs', async
   }
 });
 
-test('blank tabs route once on extension navigation and respect manual placement', async () => {
+test('blank tabs respect manual placement, then follow rules on later navigation', async () => {
   for (const expanded of [true, false]) {
     for (const manual of [false, true]) {
-      const app = setup([group(1, 1, !expanded), named(2, 'Oodle'), named(3, 'Manual')], [], {
+      const app = setup([group(1, 1, !expanded), named(2, 'Oodle'), named(3, 'Manual'), named(4, 'Web')], [], {
         rules: [rule('chrome-extension://*/*', 'Oodle'), rule('https://example.com/*', 'Web')],
       });
       await app.chrome.tabs.onCreated.emit(newTab('about:blank'));
@@ -432,7 +535,7 @@ test('blank tabs route once on extension navigation and respect manual placement
       });
       assert.equal(app.tabs.get(10).groupId, manual ? 3 : 2);
       await app.chrome.tabs.onUpdated.emit(10, { url: 'https://example.com/' });
-      assert.equal(app.tabs.get(10).groupId, manual ? 3 : 2);
+      assert.equal(app.tabs.get(10).groupId, 4);
       assert.deepEqual(app.errors, []);
     }
   }
@@ -501,7 +604,7 @@ test('unmatched URLs retain expanded-group behavior and pendingUrl can route imm
   assert.equal(app.tabs.get(11).groupId, 2);
 });
 
-test('blank tabs route on their first web navigation, then stay put on later navigation', async () => {
+test('blank tabs and later navigation follow the matching URL rules', async () => {
   for (const expanded of [true, false]) {
     const app = setup([group(1, 1, !expanded), named(2, 'Project'), named(3, 'Other')], [], {
       rules: [rule(), rule('https://other.com/*', 'Other')],
@@ -511,16 +614,16 @@ test('blank tabs route on their first web navigation, then stay put on later nav
     await app.chrome.tabs.onUpdated.emit(10, { url: 'https://example.com/project/42' });
     assert.equal(app.tabs.get(10).groupId, 2);
     await app.chrome.tabs.onUpdated.emit(10, { url: 'https://other.com/' });
-    assert.equal(app.tabs.get(10).groupId, 2);
+    assert.equal(app.tabs.get(10).groupId, 3);
   }
 });
 
-test('an unmatched first navigation ends blank-tab routing', async () => {
+test('an unmatched navigation does not prevent a later matching navigation', async () => {
   const app = setup([group(1), named(2, 'Project')], [], { rules: [rule()] });
   await app.chrome.tabs.onCreated.emit(newTab('about:blank'));
   await app.chrome.tabs.onUpdated.emit(10, { url: 'https://unrelated.com/' });
   await app.chrome.tabs.onUpdated.emit(10, { url: 'https://example.com/project/42' });
-  assert.equal(app.tabs.get(10).groupId, 1);
+  assert.equal(app.tabs.get(10).groupId, 2);
 });
 
 test('manual placement and pinning cancel deferred routing, including move-away-and-back', async () => {
