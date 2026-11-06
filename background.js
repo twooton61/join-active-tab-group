@@ -1,3 +1,5 @@
+importScripts('rules.js');
+
 // A new ungrouped tab joins the expanded (not collapsed) group in its window.
 // If several groups are expanded, it joins the group of the tab that was
 // active before it appeared, when that group is one of them.
@@ -28,6 +30,10 @@ const serially = (task) => (queue = queue
   .catch((error) => console.error('join-active-tab-group:', error)));
 
 const key = (windowId) => `window:${windowId}`;
+const routeKey = (tabId) => `route:${tabId}`;
+const destination = (tab) => tab.pendingUrl || tab.url || '';
+const isRoutableUrl = (url) => /^(https?|chrome-extension|chrome|brave):\/\//.test(url);
+const isWaitingUrl = (url) => !url || /^(about:blank|chrome:\/\/newtab\/|brave:\/\/newtab\/)$/.test(url);
 
 async function collapseOtherGroups(group, isCurrent = () => true) {
   // Events may be queued while a group is collapsed or removed.
@@ -112,14 +118,73 @@ async function pickGroup(tab) {
 // Wait outside the queue so group and activation events can still run.
 const NEW_TAB_SETTLE_MS = 500;
 const pendingTabs = new Set();
+const placementVersions = new Map();
 // Once the browser or user has assigned a group, this is no longer our tab
 // to place, even if it becomes ungrouped again before a queued edit runs.
+// Only blank/new-tab pages placed by us may be routed on their first supported
+// navigation away from the placeholder. Persist ownership while the worker sleeps.
 chrome.tabs.onUpdated.addListener((tabId, changes) => {
+  if (changes.groupId !== undefined || changes.pinned !== undefined) {
+    placementVersions.set(tabId, (placementVersions.get(tabId) ?? 0) + 1);
+  }
   if (changes.groupId !== undefined && changes.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) {
     pendingTabs.delete(tabId);
   }
+  if (changes.url === undefined && changes.groupId === undefined && changes.pinned === undefined) return;
+  const update = serially(async () => {
+    const entry = (await chrome.storage.session.get(routeKey(tabId)))[routeKey(tabId)];
+    if (!entry) return;
+    if (changes.pinned || (changes.groupId !== undefined && changes.groupId !== entry.groupId)) {
+      await chrome.storage.session.remove(routeKey(tabId));
+      return;
+    }
+    if (!changes.url || !isRoutableUrl(changes.url) || isWaitingUrl(changes.url) || pendingTabs.has(tabId)) return;
+    const current = await chrome.tabs.get(tabId).catch(() => null);
+    if (current && !current.pinned && current.groupId === entry.groupId) {
+      await placeTab(current, () => true, entry.groupId, false);
+    }
+    await chrome.storage.session.remove(routeKey(tabId));
+  });
+  if (changes.url) return update;
 });
-chrome.tabs.onRemoved.addListener((tabId) => pendingTabs.delete(tabId));
+chrome.tabs.onRemoved.addListener((tabId) => {
+  pendingTabs.delete(tabId);
+  placementVersions.delete(tabId);
+  return serially(() => chrome.storage.session.remove(routeKey(tabId)));
+});
+
+async function placeTab(tab, isCurrent, expectedGroupId, fallback = true) {
+  const version = placementVersions.get(tab.id);
+  const url = destination(tab);
+  const { urlRules = [] } = await chrome.storage.sync.get('urlRules');
+  const rule = UrlRules.firstMatch(urlRules, url);
+  const groups = rule ? await chrome.tabGroups.query({ windowId: tab.windowId }) : [];
+  const group = rule
+    ? groups.find((candidate) => candidate.title === rule.groupName)
+    : fallback ? await pickGroup(tab) : null;
+  // Picking a destination uses async APIs; respect changes during it too.
+  const latest = await chrome.tabs.get(tab.id).catch(() => null);
+  if (!isCurrent() || !latest || latest.pinned || latest.groupId !== expectedGroupId || placementVersions.get(tab.id) !== version) return;
+  if (destination(latest) !== url || latest.windowId !== tab.windowId) {
+    return placeTab(latest, isCurrent, expectedGroupId, fallback);
+  }
+  if (isWaitingUrl(url)) {
+    await chrome.storage.session.set({ [routeKey(tab.id)]: { groupId: group?.id ?? expectedGroupId } });
+  }
+  if (!group && !rule) return;
+  let groupId = group?.id;
+  if (groupId === undefined) {
+    groupId = await chrome.tabs.group({ tabIds: tab.id, createProperties: { windowId: tab.windowId } });
+    // Once creation succeeds, retry naming separately to avoid creating an
+    // extra group if the tab strip temporarily locks between these edits.
+    await retryTabEdits(() => chrome.tabGroups.update(groupId, { title: rule.groupName, collapsed: !latest.active }));
+  } else if (latest.groupId !== groupId) {
+    await chrome.tabs.group({ groupId, tabIds: tab.id });
+  }
+  if (rule && latest.active) {
+    await retryTabEdits(() => chrome.tabGroups.update(groupId, { collapsed: false }));
+  }
+}
 
 chrome.tabs.onCreated.addListener(async (tab) => {
   if (tab.pinned || tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) return;
@@ -128,16 +193,9 @@ chrome.tabs.onCreated.addListener(async (tab) => {
     await new Promise((resolve) => setTimeout(resolve, NEW_TAB_SETTLE_MS));
     return await serially(async () => {
       if (!pendingTabs.has(tab.id)) return;
-      // A tab may have closed, been pinned, or joined a group while waiting.
       const current = await chrome.tabs.get(tab.id).catch(() => null);
-      // Brave sets openerTabId even for links from other apps, so check the group instead.
       if (!current || current.pinned || current.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) return;
-      const group = await pickGroup(current);
-      if (!group) return;
-      // Picking a group uses async APIs; respect membership changes during it too.
-      const latest = await chrome.tabs.get(tab.id).catch(() => null);
-      if (!pendingTabs.has(tab.id) || !latest || latest.pinned || latest.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) return;
-      await chrome.tabs.group({ groupId: group.id, tabIds: current.id });
+      await placeTab(current, () => pendingTabs.has(tab.id), chrome.tabGroups.TAB_GROUP_ID_NONE);
     });
   } finally {
     pendingTabs.delete(tab.id);

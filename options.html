@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>URL rules · join-active-tab-group</title>
+  <link rel="stylesheet" href="options.css">
+  <script src="rules.js" defer></script>
+  <script src="options.js" defer></script>
+</head>
+<body>
+  <main>
+    <h1>URL rules</h1>
+    <p>Give each group a name and list one URL wildcard per line.
+      Start a line with <code>#</code> to disable it. The first matching line wins,
+      reading groups from top to bottom.</p>
+    <p class="note">Use <code>*</code> for any text, including slashes. A trailing <code>/*</code>
+      also matches the root path. Queries and fragments are ignored.
+      Use <code>chrome-extension://*/*</code> for all extension pages,
+      or replace the host <code>*</code> with one extension's ID.
+      Browser pages work too: <code>brave://extensions/*</code> or <code>chrome://settings/*</code>.
+      The <code>brave://</code> and <code>chrome://</code> schemes match each other.
+      Short forms like <code>brave://*</code> and <code>chrome-extension://*</code>
+      match every host and path under that scheme.</p>
+    <form id="settings">
+      <fieldset id="editor" disabled>
+        <legend class="sr-only">Routing rules</legend>
+        <div id="rules"></div>
+        <p id="empty">No groups yet. Add a group to get started.</p>
+        <div class="toolbar">
+          <button type="button" id="add">Add group</button>
+          <button type="submit" id="save">Save changes</button>
+        </div>
+      </fieldset>
+    </form>
+    <p id="status" role="status" aria-live="polite">Loading rules…</p>
+    <section aria-labelledby="test-heading">
+      <h2 id="test-heading">Try a URL</h2>
+      <label for="test-url">URL to check against the rules above, including unsaved edits</label>
+      <input id="test-url" type="url" placeholder="https://github.com/ThinkOodle/smart-path-rails/issues">
+      <p id="test-result" role="status" aria-live="polite"></p>
+    </section>
+    <p class="note">Missing groups are created in the same window. Manually grouped and pinned tabs
+      stay where you put them. Blank new tabs can move on their first web, extension, or browser-page navigation;
+      later navigation does not change their group.</p>
+    <p class="note">Rules are saved in browser sync storage and sync when your browser and account
+      settings allow it. Chrome and Brave keep separate settings.</p>
+  </main>
+  <template id="rule-template">
+    <article class="rule">
+      <div class="group-heading">
+        <label>Group name<input name="groupName" type="text" required placeholder="My project"></label>
+        <div class="actions">
+          <button type="button" data-action="up" aria-label="Move group up">↑</button>
+          <button type="button" data-action="down" aria-label="Move group down">↓</button>
+          <button type="button" data-action="delete">Delete</button>
+        </div>
+      </div>
+      <label>URL wildcards<textarea name="patterns" rows="3" spellcheck="false" placeholder="https://example.com/project/*&#10;# https://example.com/paused/*"></textarea></label>
+    </article>
+  </template>
+</body>
+</html>
