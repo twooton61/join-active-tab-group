@@ -150,3 +150,7 @@ for size in 16 32 48 128; do
   rsvg-convert -w "$size" -h "$size" icon.svg -o "icons/icon${size}.png"
 done
 ```
+
+## License
+
+[MIT](LICENSE). Copyright (c) 2026 Terry Wooton.
