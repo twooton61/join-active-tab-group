@@ -1,4 +1,4 @@
-# join-active-tab-group
+# Tab Tether
 
 ![New tabs join the expanded group](icons/icon128.png)
 
@@ -139,6 +139,9 @@ node --test tests/*.test.cjs
 The tests simulate browser events to cover group switching, startup, separate
 windows, and new tabs. Also check the extension in Chrome or Brave after making
 behavior changes.
+
+The manifest's `key` preserves the existing unpacked extension ID when the
+checkout moves, keeping its saved rules and browser preferences connected.
 
 To regenerate the icons after editing `icon.svg`, install `rsvg-convert` and run:
 

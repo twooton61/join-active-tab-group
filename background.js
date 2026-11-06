@@ -1,7 +1,7 @@
 importScripts('rules.js');
 
 chrome.action.onClicked.addListener(() =>
-  chrome.runtime.openOptionsPage().catch((error) => console.error('join-active-tab-group:', error)),
+  chrome.runtime.openOptionsPage().catch((error) => console.error('tab-tether:', error)),
 );
 
 // A new ungrouped tab joins the expanded (not collapsed) group in its window.
@@ -31,7 +31,7 @@ async function retryTabEdits(task) {
 }
 const serially = (task) => (queue = queue
   .then(() => retryTabEdits(task))
-  .catch((error) => console.error('join-active-tab-group:', error)));
+  .catch((error) => console.error('tab-tether:', error)));
 
 const key = (windowId) => `window:${windowId}`;
 const routeKey = (tabId) => `route:${tabId}`;

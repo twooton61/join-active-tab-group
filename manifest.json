@@ -1,6 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "join-active-tab-group",
+  "name": "Tab Tether",
+  "key": "L2hvbWUvdGVycnkvbG9jYWwtc2l0ZXMvam9pbi1hY3RpdmUtdGFiLWdyb3Vw",
   "version": "1.8.0",
   "description": "New tabs join the expanded tab group or a named group based on URL rules. Expanding a group collapses the others.",
   "permissions": [
