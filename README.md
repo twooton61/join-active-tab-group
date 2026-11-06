@@ -90,6 +90,9 @@ tab's window, or creates one there. A routed active tab expands its group;
 a routed background tab leaves an existing group's expansion state alone,
 and newly created background groups are collapsed.
 
+Links opened in a new tab follow matching rules even when the browser gives
+them their opener's group first. Without a matching rule, they keep that group.
+
 URL rules also apply when an existing tab navigates to a different URL, including
 sidebar navigation within a website. For example, a Basecamp tab in SmartPath
 moves to Miami when its new URL matches a Miami rule. An unmatched URL keeps the

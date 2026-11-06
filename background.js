@@ -159,7 +159,7 @@ chrome.tabs.onUpdated.addListener((tabId, changes) => {
       ignoreFirstUrl: isWaitingUrl(changes.url) && Boolean(previous?.ignoreFirstUrl),
     };
     if (!changes.url || !isRoutableUrl(changes.url) || isWaitingUrl(changes.url)
-      || pendingTabs.has(tabId) || previous?.ignoreFirstUrl || previous?.url === changes.url || manuallyPlaced) {
+      || pendingTabs.has(tabId) || (previous?.ignoreFirstUrl && !entry) || previous?.url === changes.url || manuallyPlaced) {
       await chrome.storage.session.set({ [navigationKey(tabId)]: next });
       return;
     }
@@ -221,15 +221,22 @@ chrome.tabs.onCreated.addListener(async (tab) => {
     url,
     ignoreFirstUrl: tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE && isWaitingUrl(url),
   } }));
-  if (tab.pinned || tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) return recorded;
+  // A link opened from a grouped tab can inherit that group before onCreated.
+  // Keep tabs without an opener protected, including reopened saved groups.
+  if (tab.pinned || (tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE && tab.openerTabId === undefined)) return recorded;
   pendingTabs.add(tab.id);
   try {
     await new Promise((resolve) => setTimeout(resolve, NEW_TAB_SETTLE_MS));
     return await serially(async () => {
       if (!pendingTabs.has(tab.id)) return;
       const current = await chrome.tabs.get(tab.id).catch(() => null);
-      if (!current || current.pinned || current.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) return;
-      await placeTab(current, () => pendingTabs.has(tab.id), chrome.tabGroups.TAB_GROUP_ID_NONE);
+      if (!current || current.pinned || current.groupId !== tab.groupId) return;
+      const inherited = tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE;
+      if (inherited) {
+        const opener = await chrome.tabs.get(tab.openerTabId).catch(() => null);
+        if (!opener || opener.windowId !== current.windowId || opener.groupId !== current.groupId) return;
+      }
+      await placeTab(current, () => pendingTabs.has(tab.id), tab.groupId, !inherited);
     });
   } finally {
     pendingTabs.delete(tab.id);

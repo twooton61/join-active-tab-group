@@ -358,6 +358,47 @@ const named = (id, title, windowId = 1, collapsed = true) => ({ ...group(id, win
 const newTab = (url, extra = {}) => ({ id: 10, windowId: 1, groupId: -1, url, ...extra });
 const drain = (app) => app.chrome.tabs.onActivated.emit({ tabId: 10, windowId: 1 });
 
+test('new links inheriting the opener group follow explicit URL rules', async () => {
+  const source = newTab('https://app.basecamp.com/3091894/buckets/45782624/messages/1', { id: 9, groupId: 1 });
+  const app = setup([named(1, 'SmartPath', 1, false), named(2, 'Miami')], [source], {
+    rules: [rule('https://*.basecamp.com/3091894/*/46017775/*', 'Miami')],
+  });
+  await app.chrome.tabs.onCreated.emit(newTab(
+    'https://app.basecamp.com/3091894/buckets/46017775/messages/1042181965',
+    { groupId: 1, openerTabId: 9, active: true },
+  ));
+  await drain(app);
+  assert.equal(app.tabs.get(10).groupId, 2);
+  assert.deepEqual(app.expanded(1), [2]);
+  assert.deepEqual(app.errors, []);
+});
+
+test('inherited tabs keep their group without a rule and respect manual moves during settling', async () => {
+  for (const manual of [false, true]) {
+    const app = setup([named(1, 'SmartPath', 1, false), named(2, 'Miami'), named(3, 'Manual')], [
+      newTab('https://source.com/', { id: 9, groupId: 1 }),
+    ], { rules: [rule('https://destination.com/*', 'Miami')], holdSettling: true });
+    const pending = app.chrome.tabs.onCreated.emit(newTab(manual ? 'https://destination.com/' : 'https://unmatched.com/', {
+      groupId: 1, openerTabId: 9,
+    }));
+    if (manual) await app.chrome.tabs.onUpdated.emit(10, { groupId: 3 });
+    app.settling[0]();
+    await pending;
+    assert.deepEqual(app.joined, []);
+    assert.equal(app.tabs.get(10).groupId, manual ? 3 : 1);
+  }
+});
+
+test('a blank inherited tab follows its rule when the link URL arrives after settling', async () => {
+  const app = setup([named(1, 'SmartPath', 1, false), named(2, 'Miami')], [
+    newTab('https://source.com/', { id: 9, groupId: 1 }),
+  ], { rules: [rule('https://destination.com/*', 'Miami')] });
+  await app.chrome.tabs.onCreated.emit(newTab('', { groupId: 1, openerTabId: 9 }));
+  await app.chrome.tabs.onUpdated.emit(10, { url: 'https://destination.com/' });
+  assert.equal(app.tabs.get(10).groupId, 2);
+  assert.deepEqual(app.errors, []);
+});
+
 test('an existing SmartPath tab moves to Miami when Basecamp sidebar navigation changes its URL', async () => {
   const app = setup([named(1, 'SmartPath', 1, false), named(2, 'Miami')], [newTab(
     'https://app.basecamp.com/3091894/buckets/45782624/messages/1',
