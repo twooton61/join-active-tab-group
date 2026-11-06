@@ -1,6 +1,6 @@
 # Tab Tether
 
-![New tabs join the expanded group](icons/icon128.png)
+![Tab Tether neon pixel kraken](icons/icon128.png)
 
 A tiny Chrome and Brave extension that puts new tabs in your expanded tab group
 and keeps just one group expanded per window.

@@ -1,10 +1,35 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <title>New tabs join the expanded tab group</title>
-  <rect width="128" height="128" rx="26" fill="#111827"/>
-  <rect x="18" y="21" width="25" height="10" rx="5" fill="#64748b"/>
-  <rect x="50" y="21" width="25" height="10" rx="5" fill="#64748b"/>
-  <rect x="18" y="48" width="92" height="62" rx="12" fill="#2dd4bf"/>
-  <path d="M29 67a5 5 0 0 1 5-5h12l6 7h3a5 5 0 0 1 5 5v20a5 5 0 0 1-5 5H34a5 5 0 0 1-5-5Z" fill="#111827"/>
-  <path d="M68 67a5 5 0 0 1 5-5h12l6 7h3a5 5 0 0 1 5 5v20a5 5 0 0 1-5 5H73a5 5 0 0 1-5-5Z" fill="#111827"/>
-  <path d="M95 19v23m-9-9 9 9 9-9" fill="none" stroke="#f8fafc" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <title>Tab Tether neon pixel kraken</title>
+  <!-- A 32-pixel grid keeps the arcade sprite sharp at every icon size. -->
+  <path d="M3 0h26v1h2v2h1v26h-1v2h-2v1H3v-1H1v-2H0V3h1V1h2Z" fill="#0d0820"/>
+  <path d="M3 1h26v1H3ZM1 3h1v26H1Zm29 0h1v26h-1ZM3 30h26v1H3Z" fill="#302052"/>
+
+  <defs>
+    <g id="arms">
+      <!-- Raised arms and stepped curls form the kraken silhouette. -->
+      <path d="M12 19H8v-1H5v-2H3v-5h1V9h3v1h1v3H6v-2H5v4h2v1h5Z"/>
+      <path d="M20 19h4v-1h3v-2h2v-5h-1V9h-3v1h-1v3h2v-2h1v4h-2v1h-5Z"/>
+      <path d="M12 19v3h-2v2H7v1H3v-1H2v-4h2v3h3v-1h2v-3Z"/>
+      <path d="M20 19v3h2v2h3v1h4v-1h1v-4h-2v3h-3v-1h-2v-3Z"/>
+      <path d="M14 21v5h-1v2h-2v1H6v-1H5v-2h2v1h3v-1h1v-5Z"/>
+      <path d="M18 21v5h1v2h2v1h5v-1h1v-2h-2v1h-3v-1h-1v-5Z"/>
+    </g>
+    <path id="mantle" d="M14 10h4v1h2v2h1v2h1v5h-1v2h-2v1h-6v-1h-2v-2h-1v-5h1v-2h1v-2h2Z"/>
+  </defs>
+
+  <!-- Center the standalone kraken on the pixel grid. -->
+  <g transform="translate(0 -4)">
+  <!-- Magenta offsets give the cyan sprite an arcade-screen edge. -->
+  <use href="#arms" transform="translate(0 1)" fill="#c02cff"/>
+  <use href="#arms" fill="#1cf5e0"/>
+  <path d="M14 22h2v6h-1v2h-3v-2h1v-3h1Zm2 0h2v3h1v3h1v2h-3v-2h-1Z" fill="#bc36ff"/>
+  <use href="#mantle" transform="translate(1 1)" fill="#ff3baf"/>
+  <use href="#mantle" fill="#1cf5e0"/>
+  <path d="M14 11h3v1h-3Zm-2 2h2v2h-1v2h-1Z" fill="#bafff1"/>
+  <path d="M11 19h1v2h2v1h5v-1h2v-2h1v2h-1v1h-2v1h-6v-1h-2Z" fill="#0ab7ca"/>
+
+  <!-- High-contrast pixel eyes stay visible at toolbar size. -->
+  <path d="M12 16h2v1h2v3h-4Zm6 1h2v-1h2v4h-4Z" fill="#160c2d"/>
+  <path d="M14 18h2v2h-2Zm4 0h2v2h-2Z" fill="#fff3a3"/>
+  </g>
 </svg>
