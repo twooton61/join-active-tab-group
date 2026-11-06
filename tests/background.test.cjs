@@ -79,7 +79,8 @@ function setup(initialGroups, activeTabs = [], { editFailures = 0, holdSettling 
         return { ...group };
       },
     },
-    runtime: { onInstalled: event(), onStartup: event() },
+    action: { onClicked: event() },
+    runtime: { onInstalled: event(), onStartup: event(), openOptionsPage: async () => {} },
     windows: { onRemoved: event() },
   };
   const context = vm.createContext({

@@ -1,5 +1,9 @@
 importScripts('rules.js');
 
+chrome.action.onClicked.addListener(() =>
+  chrome.runtime.openOptionsPage().catch((error) => console.error('join-active-tab-group:', error)),
+);
+
 // A new ungrouped tab joins the expanded (not collapsed) group in its window.
 // If several groups are expanded, it joins the group of the tab that was
 // active before it appeared, when that group is one of them.

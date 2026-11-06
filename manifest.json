@@ -17,6 +17,9 @@
   "background": {
     "service_worker": "background.js"
   },
+  "action": {
+    "default_title": "Open URL rules"
+  },
   "options_ui": {
     "page": "options.html",
     "open_in_tab": true

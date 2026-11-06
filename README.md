@@ -49,7 +49,7 @@ it keeps the first expanded group it finds in that window.
 
 ## URL rules
 
-Right-click the extension icon and choose **Options** to manage URL rules.
+Click the extension icon to manage URL rules. You can also right-click it and choose **Options**.
 Add a group name and list one URL wildcard per line, then click **Save changes**.
 Start a line with `#` to disable it; remove `#` to enable it again. Blank lines
 are ignored. You can edit or delete groups and move them up or down. The first
